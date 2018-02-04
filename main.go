@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 
 	"github.com/MariaTerzieva/gotumblr"
-	"github.com/PuerkitoBio/goquery"
 	"github.com/garyburd/go-oauth/oauth"
 	"github.com/joho/godotenv"
 	"github.com/skratchdot/open-golang/open"
@@ -19,6 +18,11 @@ import (
 	"path"
 	"strings"
 )
+
+type VideoPost struct {
+	gotumblr.BasePost
+	VideoUrl string `json:"video_url"`
+}
 
 func main() {
 	dstDir := "imgs"
@@ -47,7 +51,10 @@ func main() {
 	}
 
 	photoUrls := getImageUrls(convertJsonToPhotoPosts(dashboard.Posts))
-	downloadPhotos(photoUrls, dstDir)
+	err = downloadFiles(photoUrls, dstDir)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	response := client.Posts("awesome_blog", "video", map[string]string{})
 
@@ -57,12 +64,19 @@ func main() {
 	}
 
 	fmt.Println(videoUrls)
+	err = downloadFiles(videoUrls, dstDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	//fmt.Println("finish")
 }
 
-func convertJsonToVideoPosts(jsonPosts []json.RawMessage) []gotumblr.VideoPost {
-	var videoPosts []gotumblr.VideoPost
-	var videoPost gotumblr.VideoPost
+func convertJsonToVideoPosts(jsonPosts []json.RawMessage) []VideoPost {
+	var videoPosts []VideoPost
+	//var videoPost gotumblr.VideoPost
+	var videoPost VideoPost
 	for _, post := range jsonPosts {
+		//fmt.Println(fmt.Sprintf("%s", post))
 		json.Unmarshal(post, &videoPost)
 		if videoPost.PostType != "video" {
 			continue
@@ -85,37 +99,13 @@ func convertJsonToPhotoPosts(jsonPosts []json.RawMessage) []gotumblr.PhotoPost {
 	return photoPosts
 }
 
-func getVideoUrls(videoPosts []gotumblr.VideoPost) ([]string, error) {
+func getVideoUrls(videoPosts []VideoPost) ([]string, error) {
 	var videoUrls []string
 	for _, post := range videoPosts {
 		if post.PostType != "video" {
 			continue
 		}
-
-		maxSizePlayer := post.Player[0]
-		for _, player := range post.Player {
-			if maxSizePlayer.Width < player.Width {
-				maxSizePlayer = player
-			}
-		}
-
-		reader := strings.NewReader(maxSizePlayer.Embed_code)
-		doc, err := goquery.NewDocumentFromReader(reader)
-		if err != nil {
-			return nil, err
-		}
-
-		videoDOM := doc.Find("video")
-		if videoDOM != nil {
-			sourceDOM := videoDOM.Find("source")
-			if source, ok := sourceDOM.Attr("src"); ok {
-				if videoType, ok := sourceDOM.Attr("type"); ok {
-					splitedVideoType := strings.Split(videoType, "/")
-					videoExt := splitedVideoType[len(splitedVideoType)-1]
-					videoUrls = append(videoUrls, fmt.Sprintf("%s.%s", source, videoExt))
-				}
-			}
-		}
+		videoUrls = append(videoUrls, post.VideoUrl)
 	}
 	return videoUrls, nil
 }
@@ -145,13 +135,13 @@ func getMaxSizeUrl(photo gotumblr.PhotoObject) string {
 	return maxSize.Url
 }
 
-func getImageFileName(imageUrl string) (string, error) {
-	parsedImageUrl, err := url.Parse(imageUrl)
+func getFileNameFromUrl(fileUrl string) (string, error) {
+	parsedFileUrl, err := url.Parse(fileUrl)
 	if err != nil {
 		return "", err
 	}
-	splitedImagePath := strings.Split(parsedImageUrl.Path, "/")
-	return splitedImagePath[len(splitedImagePath)-1], nil
+	splitedFilePath := strings.Split(parsedFileUrl.Path, "/")
+	return splitedFilePath[len(splitedFilePath)-1], nil
 }
 
 func isExist(filename string) bool {
@@ -159,26 +149,26 @@ func isExist(filename string) bool {
 	return err == nil
 }
 
-func downloadPhotos(photoUrls []string, dstDir string) error {
-	for _, photoUrl := range photoUrls {
-		photoFileName, err := getImageFileName(photoUrl)
+func downloadFiles(fileUrls []string, dstDir string) error {
+	for _, fileUrl := range fileUrls {
+		fileName, err := getFileNameFromUrl(fileUrl)
 		if err != nil {
 			return err
 		}
-		ok, err := download(photoUrl, dstDir)
+		ok, err := download(fileUrl, dstDir)
 		if err != nil {
 			return err
 		}
 
 		if ok {
-			fmt.Println("image is downloaded from " + photoUrl + " to " + path.Join(dstDir, photoFileName))
+			fmt.Println("file is downloaded from " + fileUrl + " to " + path.Join(dstDir, fileName))
 		}
 	}
 	return nil
 }
 
-func download(imageUrl string, dstDir string) (bool, error) {
-	imageFileName, err := getImageFileName(imageUrl)
+func download(fileUrl string, dstDir string) (bool, error) {
+	fileName, err := getFileNameFromUrl(fileUrl)
 	if err != nil {
 		return false, err
 	}
@@ -189,17 +179,17 @@ func download(imageUrl string, dstDir string) (bool, error) {
 		}
 	}
 
-	if isExist(path.Join(dstDir, imageFileName)) {
+	if isExist(path.Join(dstDir, fileName)) {
 		return false, nil
 	}
 
-	response, err := http.Get(imageUrl)
+	response, err := http.Get(fileUrl)
 	if err != nil {
 		return false, err
 	}
 	defer response.Body.Close()
 
-	file, err := os.Create(path.Join(dstDir, imageFileName))
+	file, err := os.Create(path.Join(dstDir, fileName))
 	if err != nil {
 		return false, err
 	}
