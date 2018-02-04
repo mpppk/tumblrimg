@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 
 	"github.com/MariaTerzieva/gotumblr"
+	"github.com/PuerkitoBio/goquery"
 	"github.com/garyburd/go-oauth/oauth"
 	"github.com/joho/godotenv"
 	"github.com/skratchdot/open-golang/open"
@@ -41,36 +42,97 @@ func main() {
 	)
 
 	dashboard := client.Dashboard(map[string]string{"limit": "10"})
-	if len(dashboard.Posts) != 0 {
-		var photoPost gotumblr.PhotoPost
-		var photoUrls []string
-		for _, post := range dashboard.Posts {
-			json.Unmarshal(post, &photoPost)
-			if photoPost.PostType != "photo" {
-				continue
-			}
+	if len(dashboard.Posts) == 0 {
+		return
+	}
 
-			for _, photo := range photoPost.Photos {
-				maxSizeUrl := getMaxSizeUrl(photo)
-				photoUrls = append(photoUrls, maxSizeUrl)
+	photoUrls := getImageUrls(convertJsonToPhotoPosts(dashboard.Posts))
+	downloadPhotos(photoUrls, dstDir)
+
+	response := client.Posts("awesome_blog", "video", map[string]string{})
+
+	videoUrls, err := getVideoUrls(convertJsonToVideoPosts(response.Posts))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(videoUrls)
+}
+
+func convertJsonToVideoPosts(jsonPosts []json.RawMessage) []gotumblr.VideoPost {
+	var videoPosts []gotumblr.VideoPost
+	var videoPost gotumblr.VideoPost
+	for _, post := range jsonPosts {
+		json.Unmarshal(post, &videoPost)
+		if videoPost.PostType != "video" {
+			continue
+		}
+		videoPosts = append(videoPosts, videoPost)
+	}
+	return videoPosts
+}
+
+func convertJsonToPhotoPosts(jsonPosts []json.RawMessage) []gotumblr.PhotoPost {
+	var photoPosts []gotumblr.PhotoPost
+	var photoPost gotumblr.PhotoPost
+	for _, post := range jsonPosts {
+		json.Unmarshal(post, &photoPost)
+		if photoPost.PostType != "photo" {
+			continue
+		}
+		photoPosts = append(photoPosts, photoPost)
+	}
+	return photoPosts
+}
+
+func getVideoUrls(videoPosts []gotumblr.VideoPost) ([]string, error) {
+	var videoUrls []string
+	for _, post := range videoPosts {
+		if post.PostType != "video" {
+			continue
+		}
+
+		maxSizePlayer := post.Player[0]
+		for _, player := range post.Player {
+			if maxSizePlayer.Width < player.Width {
+				maxSizePlayer = player
 			}
 		}
 
-		for _, photoUrl := range photoUrls {
-			photoFileName, err := getImageFileName(photoUrl)
-			if err != nil {
-				log.Fatal(err)
-			}
-			ok, err := download(photoUrl, dstDir)
-			if err != nil {
-				log.Fatal(err)
-			}
+		reader := strings.NewReader(maxSizePlayer.Embed_code)
+		doc, err := goquery.NewDocumentFromReader(reader)
+		if err != nil {
+			return nil, err
+		}
 
-			if ok {
-				fmt.Println("image is downloaded from " + photoUrl + " to " + path.Join(dstDir, photoFileName))
+		videoDOM := doc.Find("video")
+		if videoDOM != nil {
+			sourceDOM := videoDOM.Find("source")
+			if source, ok := sourceDOM.Attr("src"); ok {
+				if videoType, ok := sourceDOM.Attr("type"); ok {
+					splitedVideoType := strings.Split(videoType, "/")
+					videoExt := splitedVideoType[len(splitedVideoType)-1]
+					videoUrls = append(videoUrls, fmt.Sprintf("%s.%s", source, videoExt))
+				}
 			}
 		}
 	}
+	return videoUrls, nil
+}
+
+func getImageUrls(photoPosts []gotumblr.PhotoPost) []string {
+	var photoUrls []string
+	for _, post := range photoPosts {
+		if post.PostType != "photo" {
+			continue
+		}
+
+		for _, photo := range post.Photos {
+			maxSizeUrl := getMaxSizeUrl(photo)
+			photoUrls = append(photoUrls, maxSizeUrl)
+		}
+	}
+	return photoUrls
 }
 
 func getMaxSizeUrl(photo gotumblr.PhotoObject) string {
@@ -95,6 +157,24 @@ func getImageFileName(imageUrl string) (string, error) {
 func isExist(filename string) bool {
 	_, err := os.Stat(filename)
 	return err == nil
+}
+
+func downloadPhotos(photoUrls []string, dstDir string) error {
+	for _, photoUrl := range photoUrls {
+		photoFileName, err := getImageFileName(photoUrl)
+		if err != nil {
+			return err
+		}
+		ok, err := download(photoUrl, dstDir)
+		if err != nil {
+			return err
+		}
+
+		if ok {
+			fmt.Println("image is downloaded from " + photoUrl + " to " + path.Join(dstDir, photoFileName))
+		}
+	}
+	return nil
 }
 
 func download(imageUrl string, dstDir string) (bool, error) {
