@@ -1,2 +1,5 @@
 .idea
 .env
+*.jpg
+*.jpeg
+*.png

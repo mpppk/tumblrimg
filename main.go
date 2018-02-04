@@ -10,15 +10,17 @@ import (
 
 	"github.com/MariaTerzieva/gotumblr"
 	"github.com/garyburd/go-oauth/oauth"
-	"github.com/skratchdot/open-golang/open"
-	"os"
-	"net/http"
-	"io"
-	"strings"
 	"github.com/joho/godotenv"
+	"github.com/skratchdot/open-golang/open"
+	"io"
+	"net/http"
+	"os"
+	"path"
+	"strings"
 )
 
 func main() {
+	dstDir := "imgs"
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Error loading .env file")
@@ -41,22 +43,42 @@ func main() {
 	dashboard := client.Dashboard(map[string]string{"limit": "10"})
 	if len(dashboard.Posts) != 0 {
 		var photoPost gotumblr.PhotoPost
+		var photoUrls []string
 		for _, post := range dashboard.Posts {
 			json.Unmarshal(post, &photoPost)
-			imageUrl := photoPost.Photos[0].Alt_sizes[0].Url
-			imageFileName, err := getImageFileName(imageUrl)
+			if photoPost.PostType != "photo" {
+				continue
+			}
+
+			for _, photo := range photoPost.Photos {
+				maxSize := photo.Alt_sizes[0]
+				for _, size := range photo.Alt_sizes {
+					if maxSize.Height < size.Height {
+						maxSize = size
+					}
+				}
+				photoUrls = append(photoUrls, maxSize.Url)
+			}
+		}
+
+		for _, photoUrl := range photoUrls {
+			photoFileName, err := getImageFileName(photoUrl)
 			if err != nil {
 				log.Fatal(err)
 			}
-			fmt.Printf("%#v", photoPost.Photos[0].Alt_sizes[0].Url)
-			fmt.Println("")
-			fmt.Println(imageFileName)
-			//download(imageUrl, fmt.Sprintf("image%d.jpg", i))
+			ok, err := download(photoUrl, dstDir)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			if ok {
+				fmt.Println("image is downloaded from " + photoUrl + " to " + path.Join(dstDir, photoFileName))
+			}
 		}
 	}
 }
 
-func getImageFileName(imageUrl string) (string, error){
+func getImageFileName(imageUrl string) (string, error) {
 	parsedImageUrl, err := url.Parse(imageUrl)
 	if err != nil {
 		return "", err
@@ -65,20 +87,41 @@ func getImageFileName(imageUrl string) (string, error){
 	return splitedImagePath[len(splitedImagePath)-1], nil
 }
 
-func download(urlPath string, dstDir string) {
-	response, err := http.Get(urlPath)
+func isExist(filename string) bool {
+	_, err := os.Stat(filename)
+	return err == nil
+}
+
+func download(imageUrl string, dstDir string) (bool, error) {
+	imageFileName, err := getImageFileName(imageUrl)
 	if err != nil {
-		panic(err)
+		return false, err
+	}
+
+	if !isExist(dstDir) {
+		if err := os.MkdirAll(dstDir, 0777); err != nil {
+			return false, err
+		}
+	}
+
+	if isExist(path.Join(dstDir, imageFileName)) {
+		return false, nil
+	}
+
+	response, err := http.Get(imageUrl)
+	if err != nil {
+		return false, err
 	}
 	defer response.Body.Close()
 
-	file, err := os.Create(dstDir)
+	file, err := os.Create(path.Join(dstDir, imageFileName))
 	if err != nil {
-		panic(err)
+		return false, err
 	}
 	defer file.Close()
 
 	io.Copy(file, response.Body)
+	return true, nil
 }
 
 func authorize() {
