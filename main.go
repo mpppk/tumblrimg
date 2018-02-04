@@ -51,13 +51,8 @@ func main() {
 			}
 
 			for _, photo := range photoPost.Photos {
-				maxSize := photo.Alt_sizes[0]
-				for _, size := range photo.Alt_sizes {
-					if maxSize.Height < size.Height {
-						maxSize = size
-					}
-				}
-				photoUrls = append(photoUrls, maxSize.Url)
+				maxSizeUrl := getMaxSizeUrl(photo)
+				photoUrls = append(photoUrls, maxSizeUrl)
 			}
 		}
 
@@ -76,6 +71,16 @@ func main() {
 			}
 		}
 	}
+}
+
+func getMaxSizeUrl(photo gotumblr.PhotoObject) string {
+	maxSize := photo.Alt_sizes[0]
+	for _, size := range photo.Alt_sizes {
+		if maxSize.Height < size.Height {
+			maxSize = size
+		}
+	}
+	return maxSize.Url
 }
 
 func getImageFileName(imageUrl string) (string, error) {
