@@ -17,6 +17,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 )
 
 type VideoPost struct {
@@ -25,7 +26,9 @@ type VideoPost struct {
 }
 
 func main() {
-	dstDir := "imgs"
+	photoDstDir := "imgs"
+	videoDstDir := "videos"
+	postNumPerBlog := 100
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Error loading .env file")
@@ -44,31 +47,47 @@ func main() {
 		"callback_url",
 		"http://api.tumblr.com",
 	)
+	
+	blogs := client.Following(map[string]string{}).Blogs
 
-	dashboard := client.Dashboard(map[string]string{"limit": "10"})
-	if len(dashboard.Posts) == 0 {
-		return
+	var blogNames []string
+	for _, blog := range blogs {
+		blogNames = append(blogNames, blog.Name)
 	}
 
-	photoUrls := getImageUrls(convertJsonToPhotoPosts(dashboard.Posts))
-	err = downloadFiles(photoUrls, dstDir)
-	if err != nil {
-		log.Fatal(err)
-	}
+	for _, blogName := range blogNames {
+		fetchNum := 0
+		for fetchNum <= postNumPerBlog {
+			opt := map[string]string{"offset": fmt.Sprint(fetchNum)}
+			photoRes := client.Posts(blogName, "photo", opt)
+			photoUrls := getImageUrls(convertJsonToPhotoPosts(photoRes.Posts))
+			log.Printf("%d photo URLs are found on %s %d-%d", len(photoUrls), blogName, fetchNum, fetchNum+20)
+			err = downloadFiles(photoUrls, path.Join(photoDstDir, blogName))
+			if err != nil {
+				log.Print(err)
+				break
+			}
+			fetchNum += 20
+		}
 
-	response := client.Posts("awesome_blog", "video", map[string]string{})
+		fetchNum = 0
+		for fetchNum <= postNumPerBlog {
+			opt := map[string]string{"offset": fmt.Sprint(fetchNum)}
+			videoRes := client.Posts(blogName, "video", opt)
+			videoUrls, err := getVideoUrls(convertJsonToVideoPosts(videoRes.Posts))
+			log.Printf("%d photo URLs are found on %s %d-%d", len(videoUrls), blogName, fetchNum, fetchNum+20)
 
-	videoUrls, err := getVideoUrls(convertJsonToVideoPosts(response.Posts))
-	if err != nil {
-		log.Fatal(err)
-	}
+			if err != nil {
+				log.Print(err)
+			}
 
-	fmt.Println(videoUrls)
-	err = downloadFiles(videoUrls, dstDir)
-	if err != nil {
-		log.Fatal(err)
+			err = downloadFiles(videoUrls, path.Join(videoDstDir, blogName))
+			if err != nil {
+				log.Print(err)
+			}
+			fetchNum += 20
+		}
 	}
-	//fmt.Println("finish")
 }
 
 func convertJsonToVideoPosts(jsonPosts []json.RawMessage) []VideoPost {
@@ -151,17 +170,13 @@ func isExist(filename string) bool {
 
 func downloadFiles(fileUrls []string, dstDir string) error {
 	for _, fileUrl := range fileUrls {
-		fileName, err := getFileNameFromUrl(fileUrl)
-		if err != nil {
-			return err
-		}
-		ok, err := download(fileUrl, dstDir)
+		downloaded, err := download(fileUrl, dstDir)
 		if err != nil {
 			return err
 		}
 
-		if ok {
-			fmt.Println("file is downloaded from " + fileUrl + " to " + path.Join(dstDir, fileName))
+		if downloaded {
+			time.Sleep(1000 * time.Millisecond)
 		}
 	}
 	return nil
@@ -183,18 +198,17 @@ func download(fileUrl string, dstDir string) (bool, error) {
 		return false, nil
 	}
 
+	log.Printf("downloading from %s to %s...", fileUrl, path.Join(dstDir, fileName))
 	response, err := http.Get(fileUrl)
 	if err != nil {
 		return false, err
 	}
 	defer response.Body.Close()
-
 	file, err := os.Create(path.Join(dstDir, fileName))
 	if err != nil {
 		return false, err
 	}
 	defer file.Close()
-
 	io.Copy(file, response.Body)
 	return true, nil
 }
