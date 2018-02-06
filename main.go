@@ -29,6 +29,7 @@ func main() {
 	photoDstDir := "imgs"
 	videoDstDir := "videos"
 	postNumPerBlog := 100
+	maxBlogNum := 200
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Error loading .env file")
@@ -47,12 +48,15 @@ func main() {
 		"callback_url",
 		"http://api.tumblr.com",
 	)
-	
-	blogs := client.Following(map[string]string{}).Blogs
 
+	blogOffset := 0
 	var blogNames []string
-	for _, blog := range blogs {
-		blogNames = append(blogNames, blog.Name)
+	for blogOffset <= maxBlogNum {
+		blogs := client.Following(map[string]string{"offset": fmt.Sprint(blogOffset)}).Blogs
+		for _, blog := range blogs {
+			blogNames = append(blogNames, blog.Name)
+		}
+		blogOffset += 20
 	}
 
 	for _, blogName := range blogNames {
