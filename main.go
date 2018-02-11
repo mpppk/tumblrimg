@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -28,7 +29,17 @@ type VideoPost struct {
 func main() {
 	photoDstDir := "imgs"
 	videoDstDir := "videos"
-	postNumPerBlog := 100
+	postNumPerBlog := 500
+
+	fetchGlobalOffset := 0
+	if len(os.Args) > 1 {
+		num, err := strconv.Atoi(os.Args[1])
+		if err != nil {
+			log.Fatal(err)
+		}
+		fetchGlobalOffset = num
+	}
+
 	maxBlogNum := 200
 	err := godotenv.Load()
 	if err != nil {
@@ -53,43 +64,62 @@ func main() {
 	var blogNames []string
 	for blogOffset <= maxBlogNum {
 		blogs := client.Following(map[string]string{"offset": fmt.Sprint(blogOffset)}).Blogs
+
+		if len(blogs) == 0 {
+			fmt.Println("blog num zero")
+			break
+		}
 		for _, blog := range blogs {
 			blogNames = append(blogNames, blog.Name)
 		}
 		blogOffset += 20
 	}
 
-	for _, blogName := range blogNames {
-		fetchNum := 0
-		for fetchNum <= postNumPerBlog {
+	requestCount := 0
+	for i, blogName := range blogNames {
+		fmt.Printf("---- fetch from %s %d/%d----\n", blogName, i, len(blogNames))
+		fetchNum := fetchGlobalOffset
+		for fetchNum <= postNumPerBlog+fetchGlobalOffset {
 			opt := map[string]string{"offset": fmt.Sprint(fetchNum)}
 			photoRes := client.Posts(blogName, "photo", opt)
+			requestCount++
 			photoUrls := getImageUrls(convertJsonToPhotoPosts(photoRes.Posts))
-			log.Printf("%d photo URLs are found on %s %d-%d", len(photoUrls), blogName, fetchNum, fetchNum+20)
+			log.Printf("%d photo URLs are found on %s %d-%d / %d request: %d",
+				len(photoUrls), blogName, fetchNum, fetchNum+20, postNumPerBlog+fetchGlobalOffset, requestCount)
+			if len(photoUrls) == 0 {
+				time.Sleep(4000 * time.Millisecond)
+				break
+			}
 			err = downloadFiles(photoUrls, path.Join(photoDstDir, blogName))
 			if err != nil {
 				log.Print(err)
 				break
 			}
 			fetchNum += 20
+			time.Sleep(4000 * time.Millisecond)
 		}
 
-		fetchNum = 0
-		for fetchNum <= postNumPerBlog {
+		fetchNum = fetchGlobalOffset
+		for fetchNum <= postNumPerBlog+fetchGlobalOffset {
 			opt := map[string]string{"offset": fmt.Sprint(fetchNum)}
 			videoRes := client.Posts(blogName, "video", opt)
+			requestCount++
 			videoUrls, err := getVideoUrls(convertJsonToVideoPosts(videoRes.Posts))
-			log.Printf("%d photo URLs are found on %s %d-%d", len(videoUrls), blogName, fetchNum, fetchNum+20)
-
 			if err != nil {
 				log.Print(err)
 			}
-
+			log.Printf("%d video URLs are found on %s %d-%d / %d request: %d",
+				len(videoUrls), blogName, fetchNum, fetchNum+20, postNumPerBlog+fetchGlobalOffset, requestCount)
+			if len(videoUrls) == 0 {
+				time.Sleep(4000 * time.Millisecond)
+				break
+			}
 			err = downloadFiles(videoUrls, path.Join(videoDstDir, blogName))
 			if err != nil {
 				log.Print(err)
 			}
 			fetchNum += 20
+			time.Sleep(4000 * time.Millisecond)
 		}
 	}
 }
@@ -180,7 +210,7 @@ func downloadFiles(fileUrls []string, dstDir string) error {
 		}
 
 		if downloaded {
-			time.Sleep(1000 * time.Millisecond)
+			time.Sleep(2000 * time.Millisecond)
 		}
 	}
 	return nil
