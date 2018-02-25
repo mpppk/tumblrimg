@@ -78,11 +78,18 @@ func main() {
 				time.Sleep(4000 * time.Millisecond)
 				break
 			}
-			err = img.DownloadFiles(photoUrls, path.Join(photoDstDir, blogName))
+
+			downloadNum, err := img.DownloadFiles(photoUrls, path.Join(photoDstDir, blogName), 2000)
 			if err != nil {
 				log.Print(err)
 				break
 			}
+
+			if downloadNum == 0 {
+				time.Sleep(4000 * time.Millisecond)
+				break
+			}
+
 			fetchNum += 20
 			time.Sleep(4000 * time.Millisecond)
 		}
@@ -92,20 +99,30 @@ func main() {
 			opt := map[string]string{"offset": fmt.Sprint(fetchNum)}
 			videoRes := client.Posts(blogName, "video", opt)
 			requestCount++
+
 			videoUrls, err := tumblr.GetVideoUrls(tumblr.ConvertJsonToVideoPosts(videoRes.Posts))
 			if err != nil {
 				log.Print(err)
 			}
+
 			log.Printf("%d video URLs are found on %s %d-%d / %d request: %d",
 				len(videoUrls), blogName, fetchNum, fetchNum+20, postNumPerBlog+fetchGlobalOffset, requestCount)
+
 			if len(videoUrls) == 0 {
 				time.Sleep(4000 * time.Millisecond)
 				break
 			}
-			err = img.DownloadFiles(videoUrls, path.Join(videoDstDir, blogName))
+
+			downloadNum, err := img.DownloadFiles(videoUrls, path.Join(videoDstDir, blogName), 2000)
 			if err != nil {
 				log.Print(err)
 			}
+
+			if downloadNum == 0 {
+				time.Sleep(4000 * time.Millisecond)
+				break
+			}
+
 			fetchNum += 20
 			time.Sleep(4000 * time.Millisecond)
 		}
